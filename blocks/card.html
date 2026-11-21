@@ -20,6 +20,19 @@
         padding: 0;
       }
 
+      /* 去掉安卓点击时盖在按钮上的蓝色方块高亮和焦点框 */
+      button {
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: manipulation;
+        outline: none;
+      }
+      button:focus:not(:focus-visible) {
+        outline: none;
+      }
+
       /* 玻璃卡片：封面模糊后铺底，上面叠白色玻璃层 */
       .card {
         position: relative;
