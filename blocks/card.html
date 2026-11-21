@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        color: var(--oc-fg, #111);
+        font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+        font-size: 13px;
+      }
+      #root {
+        padding: 0;
+      }
+
+      /* 玻璃卡片：封面模糊后铺底，上面叠白色玻璃层 */
+      .card {
+        position: relative;
+        isolation: isolate;
+        overflow: hidden;
+        border-radius: calc(var(--oc-rem, 1rem) * 0.75);
+        color: #fff;
+      }
+      .veil {
+        position: absolute;
+        inset: -24%;
+        z-index: -2;
+        background-position: center;
+        background-size: cover;
+        background-repeat: no-repeat;
+        filter: blur(24px) saturate(1.6) brightness(0.58);
+        transform: scale(1.12);
+      }
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        border-radius: inherit;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05));
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        pointer-events: none;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+      }
+      .row.tight {
+        padding: 12px 14px;
+      }
+      .cover {
+        width: 52px;
+        height: 52px;
+        flex: 0 0 52px;
+        border-radius: 50%;
+        object-fit: cover;
+        background: rgba(255, 255, 255, 0.18);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.34);
+      }
+      .meta {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .title {
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.3;
+        color: #fff;
+        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .artist {
+        margin-top: 2px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.82);
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .bar {
+        margin-top: 8px;
+        height: 3px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.26);
+        overflow: hidden;
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        width: 0%;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.94);
+        transition: width 0.2s linear;
+      }
+      .play {
+        width: 40px;
+        height: 40px;
+        flex: 0 0 40px;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.18);
+        color: #fff;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        transition: background 0.15s ease, transform 0.15s ease;
+      }
+      .play:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+      .play:active {
+        transform: scale(0.94);
+      }
+      .play svg {
+        width: 16px;
+        height: 16px;
+      }
+      .play.busy {
+        opacity: 0.55;
+        pointer-events: none;
+      }
+      .note {
+        padding: 12px;
+        font-size: 12px;
+        color: var(--oc-muted, rgba(127, 127, 127, 0.9));
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 0;
+        padding: 0 12px 12px;
+      }
+      .chips button {
+        border: 1px solid rgba(255, 255, 255, 0.34);
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.9);
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        cursor: pointer;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .chips button[aria-pressed="true"] {
+        border-color: rgba(255, 255, 255, 0.8);
+        background: rgba(255, 255, 255, 0.24);
+        color: #fff;
+      }
+
+      /* 没封面时退化成主题色卡片，文字回到正常前景色 */
+      .card.plain {
+        background: var(--oc-elevated, rgba(127, 127, 127, 0.1));
+        color: var(--oc-fg, #111);
+      }
+      .card.plain .veil {
+        display: none;
+      }
+      .card.plain::after {
+        border-color: var(--oc-border, rgba(0, 0, 0, 0.12));
+        background: none;
+      }
+      .card.plain .title {
+        color: var(--oc-fg, #111);
+        text-shadow: none;
+      }
+      .card.plain .artist {
+        color: var(--oc-muted, rgba(127, 127, 127, 0.9));
+        text-shadow: none;
+      }
+      .card.plain .bar {
+        background: rgba(127, 127, 127, 0.25);
+      }
+      .card.plain .bar > i {
+        background: var(--oc-primary, #1677ff);
+      }
+      .card.plain .play {
+        border-color: transparent;
+        background: var(--oc-primary, #1677ff);
+        color: var(--oc-primary-fg, #fff);
+      }
+      .card.plain .chips button {
+        border-color: var(--oc-border, rgba(0, 0, 0, 0.12));
+        background: transparent;
+        color: var(--oc-fg, #111);
+      }
+      .card.plain .chips button[aria-pressed="true"] {
+        border-color: var(--oc-primary, #1677ff);
+        background: transparent;
+        color: var(--oc-primary, #1677ff);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"><div class="note">正在搜索…</div></div>
+    <script src="./card.js"></script>
+  </body>
+</html>

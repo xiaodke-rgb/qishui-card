@@ -1,0 +1,26 @@
+{
+  "name": "qishui-card",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=2.7.4" },
+    "id": "qishui-card",
+    "name": "汽水音乐卡片",
+    "icon": "music-2",
+    "contributes": {
+      "service": { "entry": "service/main.js", "runtime": "host", "permissions": { "exec": [] } },
+      "blocks": [
+        {
+          "name": "QishuiCard",
+          "description": "汽水音乐卡片，点开就能听。query: 歌名，知道的话带上歌手",
+          "args": ["query"],
+          "entry": "blocks/card.html",
+          "height": 96
+        }
+      ]
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "2.7.4-canary.20261121.27" }
+}
