@@ -39,7 +39,7 @@ const search = async (query: string): Promise<{ results: Hit[]; error?: string }
 };
 
 const loadAudio = async (id: string): Promise<Uint8Array> => {
-  const body = await read<{ dataUrl?: string; error?: string }>('/audio', { id, quality: 'higher' });
+  const body = await read<{ dataUrl?: string; error?: string }>('/audio', { id, quality: 'medium' });
   if (!body?.dataUrl) throw new Error(body?.error ?? '拿不到音频');
   const binary = atob(body.dataUrl.slice(body.dataUrl.indexOf(',') + 1));
   const bytes = new Uint8Array(binary.length);
@@ -56,6 +56,16 @@ const render = async (query: string): Promise<void> => {
   } catch (error) {
     root.replaceChildren(note(`搜索失败：${(error as Error).message}`));
     return;
+  }
+
+  // 会员登录后 svip 曲也可以播；服务端已按登录态标过，这里再兜一次底。
+  if (hits.some((hit) => !hit.playable)) {
+    try {
+      const me = await read<{ loggedIn?: boolean; user?: { isVip?: boolean } }>('/me');
+      if (me?.loggedIn && me?.user?.isVip) hits = hits.map((hit) => ({ ...hit, playable: true }));
+    } catch {
+      /* 读不到登录态就当未登录 */
+    }
   }
 
   const playable = hits.filter((hit) => hit.playable);

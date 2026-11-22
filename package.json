@@ -18,6 +18,14 @@
           "args": ["query"],
           "entry": "blocks/card.html",
           "height": 96
+        },
+        {
+          "name": "QishuiLogin",
+          "description": "汽水音乐登录卡片，扫码即可用会员曲",
+          "args": [],
+          "entry": "blocks/login.html",
+          "height": 300,
+          "answers": true
         }
       ]
     }

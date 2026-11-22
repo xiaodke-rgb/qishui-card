@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        color: var(--oc-fg, #111);
+        font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+        font-size: 13px;
+      }
+      #root {
+        padding: 0;
+      }
+
+      /* 去掉安卓点击时盖在按钮上的蓝色方块高亮和焦点框 */
+      button {
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: manipulation;
+        outline: none;
+      }
+      button:focus:not(:focus-visible) {
+        outline: none;
+      }
+
+      .card {
+        position: relative;
+        isolation: isolate;
+        overflow: hidden;
+        border-radius: calc(var(--oc-rem, 1rem) * 0.75);
+        background: var(--oc-elevated, rgba(127, 127, 127, 0.1));
+        color: var(--oc-fg, #111);
+      }
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        border-radius: inherit;
+        border: 1px solid var(--oc-border, rgba(0, 0, 0, 0.12));
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04));
+        pointer-events: none;
+      }
+
+      .body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 14px 12px;
+      }
+      .qr {
+        width: 240px;
+        height: 240px;
+        border-radius: 12px;
+        background: #fff;
+        object-fit: contain;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+        border: none;
+      }
+      .qr[hidden] {
+        display: none;
+      }
+      .status {
+        font-size: 12px;
+        line-height: 1.4;
+        text-align: center;
+        color: var(--oc-muted, rgba(127, 127, 127, 0.9));
+        min-height: 1.4em;
+      }
+      .status.ok {
+        color: var(--oc-primary, #1677ff);
+        font-weight: 600;
+      }
+      .status.bad {
+        color: var(--oc-danger, #d33);
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .actions button {
+        border: 1px solid var(--oc-border, rgba(0, 0, 0, 0.12));
+        background: transparent;
+        color: var(--oc-fg, #111);
+        border-radius: 999px;
+        padding: 5px 14px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: background 0.15s ease, transform 0.15s ease;
+      }
+      .actions button:hover {
+        background: var(--oc-hover, rgba(127, 127, 127, 0.12));
+      }
+      .actions button:active {
+        transform: scale(0.96);
+      }
+      .actions button.busy {
+        opacity: 0.55;
+        pointer-events: none;
+      }
+      .hint {
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--oc-muted, rgba(127, 127, 127, 0.9));
+        text-align: center;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+      }
+      details {
+        width: 100%;
+        text-align: center;
+      }
+      summary {
+        font-size: 11px;
+        color: var(--oc-muted, rgba(127, 127, 127, 0.9));
+        cursor: pointer;
+      }
+      details code {
+        display: block;
+        margin-top: 6px;
+        font-family: var(--font-mono, ui-monospace, monospace);
+        font-size: 10px;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+        color: var(--oc-muted, rgba(127, 127, 127, 0.9));
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"><div class="status">正在生成二维码…</div></div>
+    <script src="./login.js"></script>
+  </body>
+</html>
