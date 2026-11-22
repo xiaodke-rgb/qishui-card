@@ -686,7 +686,7 @@ var meState = async () => {
     return { loggedIn: true, user: session.user };
   }
 };
-var trackOf = (item) => item?.entity?.track ?? item?.track ?? null;
+var trackOf = (item) => item?.entity?.track ?? item?.track_entity ?? item?.track ?? null;
 var coverUrl = (track) => {
   const cover = track?.display_info?.cover_url;
   const base = cover?.urls?.[0];
@@ -710,19 +710,20 @@ var asDataUrl = async (url) => {
     return "";
   }
 };
-var hitsOf = async (entities, vip) => {
-  const tracks = entities.map(trackOf).filter(Boolean);
-  return Promise.all(tracks.slice(0, 8).map(async (track) => {
+var hitsOf = async (entities, vip, limit = 8, covers = "all") => {
+  const tracks = entities.map(trackOf).filter(Boolean).slice(0, limit);
+  return Promise.all(tracks.map(async (track, index) => {
     const isFree = String(track?.commerce_info?.playable_condition ?? "") === "1 == 1";
     const full = track?.player_info?.full;
     const hasFull = !!full?.video_model_info?.video_model;
     const playable = hasFull || vip;
+    const wantCover = covers === "all" ? playable || isFree : index === 0;
     return {
       id: String(track?.base_info?.id ?? ""),
       title: String(track?.base_info?.name ?? ""),
       artist: (track?.related_info?.artist_links ?? []).map((a) => a?.name).filter(Boolean).join(" / "),
       duration: Number(track?.base_info?.duration_ms ?? 0),
-      cover: playable || isFree ? await asDataUrl(coverUrl(track)) : "",
+      cover: wantCover ? await asDataUrl(coverUrl(track)) : "",
       playable
     };
   }));
@@ -748,6 +749,77 @@ var search = async (q) => {
   const hits = await hitsOf(entities, session?.user.isVip === true);
   searchCache = { key: q, at: Date.now(), hits };
   return hits;
+};
+var guardPost = async (path, payload, session) => {
+  const res = await fetch(`https://open.douyin.com${PREFIX}${path}/?${params(session.deviceId)}`, {
+    method: "POST",
+    headers: guardHeaders(session, path),
+    body: JSON.stringify({ ...payload, common_params: { user_id: session.user.id } })
+  });
+  const text = await res.text();
+  if (!res.ok)
+    throw new Error(`汽水接口 ${res.status}`);
+  const body = JSON.parse(text);
+  const code = body?.err_no ?? body?.data?.error_code ?? 0;
+  if (code)
+    throw new Error(`汽水接口返回 ${code}: ${body?.err_msg ?? ""}`);
+  return body;
+};
+var playlists = async (session) => {
+  const body = await guardPost("/me/playlist/", { count: 100, cursor: "" }, session);
+  const rows = body?.data?.playlists ?? body?.data?.playlist_list ?? [];
+  return rows.map((row) => row?.base_info ?? row?.playlist?.base_info ?? row).filter((base) => base?.id && base?.title).map((base) => ({
+    id: String(base.id),
+    title: String(base.title),
+    count: Number(base?.track_count ?? base?.media_count ?? 0)
+  }));
+};
+var likedPlaylist = async (session) => {
+  const list = await playlists(session);
+  const liked = list.find((item) => item.title.includes("我喜欢")) ?? list[0];
+  if (!liked)
+    throw new Error("账号里没有歌单");
+  return liked;
+};
+var playlistDetail = async (id, session) => {
+  const body = await platformPost("/playlist/detail/", { playlist_id: id, owner_id: session.user.id, count: 100, cursor: "", type: 1 }, session);
+  return (body?.data?.media_entities ?? []).map((entity) => String(entity?.media_id ?? entity?.track_entity?.base_info?.id ?? "")).filter(Boolean);
+};
+var tracksByIds = async (ids, session) => {
+  const wanted = [];
+  for (const id of ids)
+    if (id && !wanted.includes(id))
+      wanted.push(id);
+  const hits = [];
+  for (let index = 0;index < wanted.length && hits.length < 8; index += 8) {
+    const batch = wanted.slice(index, index + 8);
+    const body = await platformPost("/media/mget/", { media_list: batch.map((id) => ({ id, type: "track" })) }, session);
+    const entities = body?.data?.media_list ?? [];
+    hits.push(...await hitsOf(entities, session?.user.isVip === true, 8 - hits.length));
+  }
+  return hits;
+};
+var PLAYLIST_MAX = 8;
+var playlist = async (source) => {
+  const session = readSession();
+  const raw = source.trim();
+  if (!raw)
+    throw new Error("没有给歌单");
+  if (raw.startsWith("@")) {
+    if (!session)
+      throw new Error("歌单需要先扫码登录");
+    const liked = await likedPlaylist(session);
+    const ids = await playlistDetail(liked.id, session);
+    const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX + 8), session);
+    return { title: liked.title, playlistId: liked.id, total: ids.length, tracks };
+  }
+  const ids = raw.split("|").map((part) => part.trim()).filter(Boolean);
+  if (!ids.length)
+    throw new Error("没有给歌单");
+  const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX), session);
+  if (!tracks.length)
+    throw new Error("这些歌都拿不到");
+  return { title: `${tracks.length} 首歌`, playlistId: "", total: ids.length, tracks };
 };
 var AUDIO_MAX = 6000000;
 var audioCache = { key: "", at: 0, audio: { dataUrl: "", mime: "", size: 0 } };
@@ -831,6 +903,24 @@ http.createServer((req, res) => {
       return;
     }
     search(q).then((results) => answer(res, 200, { results })).catch((error) => answer(res, 200, { results: [], error: error.message }));
+    return;
+  }
+  if (url.pathname === "/playlist") {
+    const source = (url.searchParams.get("source") ?? "").trim();
+    if (!source) {
+      answer(res, 200, { error: "缺少歌单" });
+      return;
+    }
+    playlist(source).then((result) => answer(res, 200, result)).catch((error) => answer(res, 200, { error: error.message }));
+    return;
+  }
+  if (url.pathname === "/playlists") {
+    const session = readSession();
+    if (!session) {
+      answer(res, 200, { loggedIn: false, playlists: [] });
+      return;
+    }
+    playlists(session).then((rows) => answer(res, 200, { loggedIn: true, playlists: rows })).catch((error) => answer(res, 200, { loggedIn: true, playlists: [], error: error.message }));
     return;
   }
   if (url.pathname === "/audio") {

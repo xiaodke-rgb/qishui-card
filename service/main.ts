@@ -387,7 +387,7 @@ const meState = async (): Promise<{ loggedIn: boolean; user?: User }> => {
 
 export type Hit = { id: string; title: string; artist: string; duration: number; cover: string; playable: boolean };
 
-const trackOf = (item: any): any | null => item?.entity?.track ?? item?.track ?? null;
+const trackOf = (item: any): any | null => item?.entity?.track ?? item?.track_entity ?? item?.track ?? null;
 
 const coverUrl = (track: any): string => {
   const cover = track?.display_info?.cover_url;
@@ -410,21 +410,23 @@ const asDataUrl = async (url: string): Promise<string> => {
   }
 };
 
-const hitsOf = async (entities: any[], vip: boolean): Promise<Hit[]> => {
-  const tracks = entities.map(trackOf).filter(Boolean);
+// covers: 全部取图很慢（每张一次下载），歌单列表只要首曲做模糊底图。
+const hitsOf = async (entities: any[], vip: boolean, limit = 8, covers: 'all' | 'first' = 'all'): Promise<Hit[]> => {
+  const tracks = entities.map(trackOf).filter(Boolean).slice(0, limit);
   return Promise.all(
-    tracks.slice(0, 8).map(async (track: any) => {
+    tracks.map(async (track: any, index: number) => {
       const isFree = String(track?.commerce_info?.playable_condition ?? '') === '1 == 1';
       const full = track?.player_info?.full;
       const hasFull = !!full?.video_model_info?.video_model;
       // 会员登录后 svip 曲也允许播放，标记交给播放接口做最终判断。
       const playable = hasFull || vip;
+      const wantCover = covers === 'all' ? playable || isFree : index === 0;
       return {
         id: String(track?.base_info?.id ?? ''),
         title: String(track?.base_info?.name ?? ''),
         artist: (track?.related_info?.artist_links ?? []).map((a: any) => a?.name).filter(Boolean).join(' / '),
         duration: Number(track?.base_info?.duration_ms ?? 0),
-        cover: playable || isFree ? await asDataUrl(coverUrl(track)) : '',
+        cover: wantCover ? await asDataUrl(coverUrl(track)) : '',
         playable,
       };
     }),
@@ -458,8 +460,89 @@ const search = async (q: string): Promise<Hit[]> => {
   return hits;
 };
 
-const AUDIO_MAX = 6_000_000;
-let audioCache: { key: string; at: number; audio: { dataUrl: string; mime: string; size: number } } = { key: '', at: 0, audio: { dataUrl: '', mime: '', size: 0 } };
+// ---------------------------------------------------------------- 歌单
+
+/** 账号接口（/me/playlist/）必须用 ticket-guard；匿名 token 会返回 28001003。 */
+const guardPost = async (path: string, payload: Record<string, unknown>, session: Session): Promise<any> => {
+  const res = await fetch(`https://open.douyin.com${PREFIX}${path}/?${params(session.deviceId)}`, {
+    method: 'POST',
+    headers: guardHeaders(session, path),
+    body: JSON.stringify({ ...payload, common_params: { user_id: session.user.id } }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`汽水接口 ${res.status}`);
+  const body = JSON.parse(text);
+  const code = body?.err_no ?? body?.data?.error_code ?? 0;
+  if (code) throw new Error(`汽水接口返回 ${code}: ${body?.err_msg ?? ''}`);
+  return body;
+};
+
+type PlaylistRef = { id: string; title: string; count: number };
+
+/** 账号歌单列表。「我喜欢的音乐」是 type === 1 的普通歌单，id 每个账号不同。 */
+const playlists = async (session: Session): Promise<PlaylistRef[]> => {
+  const body = await guardPost('/me/playlist/', { count: 100, cursor: '' }, session);
+  const rows: any[] = body?.data?.playlists ?? body?.data?.playlist_list ?? [];
+  return rows
+    .map((row) => row?.base_info ?? row?.playlist?.base_info ?? row)
+    .filter((base) => base?.id && base?.title)
+    .map((base) => ({
+      id: String(base.id),
+      title: String(base.title),
+      count: Number(base?.track_count ?? base?.media_count ?? 0),
+    }));
+};
+
+const likedPlaylist = async (session: Session): Promise<PlaylistRef> => {
+  const list = await playlists(session);
+  const liked = list.find((item) => item.title.includes('我喜欢')) ?? list[0];
+  if (!liked) throw new Error('账号里没有歌单');
+  return liked;
+};
+
+/** /playlist/detail/ 反而吃匿名 token + user_id（guard 头会 28001003）。 */
+const playlistDetail = async (id: string, session: Session): Promise<any[]> => {
+  const body = await platformPost('/playlist/detail/', { playlist_id: id, owner_id: session.user.id, count: 100, cursor: '', type: 1 }, session);
+  return (body?.data?.media_entities ?? []).map((entity: any) => String(entity?.media_id ?? entity?.track_entity?.base_info?.id ?? '')).filter(Boolean);
+};
+
+/** 批量取详情（一次 mget 最多 8 首，返回里可能少个别失效曲）。 */
+const tracksByIds = async (ids: string[], session: Session | null): Promise<Hit[]> => {
+  const wanted: string[] = [];
+  for (const id of ids) if (id && !wanted.includes(id)) wanted.push(id);
+  const hits: Hit[] = [];
+  for (let index = 0; index < wanted.length && hits.length < 8; index += 8) {
+    const batch = wanted.slice(index, index + 8);
+    const body = await platformPost('/media/mget/', { media_list: batch.map((id) => ({ id, type: 'track' })) }, session);
+    const entities = body?.data?.media_list ?? [];
+    hits.push(...(await hitsOf(entities, session?.user.isVip === true, 8 - hits.length)));
+  }
+  return hits;
+};
+
+const PLAYLIST_MAX = 8;
+
+/** source: "@liked" / "@me" 取账号收藏，否则按 id1|id2|... 取指定曲目。 */
+const playlist = async (source: string): Promise<{ title: string; playlistId: string; total: number; tracks: Hit[]; error?: string }> => {
+  const session = readSession();
+  const raw = source.trim();
+  if (!raw) throw new Error('没有给歌单');
+  if (raw.startsWith('@')) {
+    if (!session) throw new Error('歌单需要先扫码登录');
+    const liked = await likedPlaylist(session);
+    const ids = await playlistDetail(liked.id, session);
+    // mget 偶尔少返回失效曲，多取一截补满。
+    const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX + 8), session);
+    return { title: liked.title, playlistId: liked.id, total: ids.length, tracks };
+  }
+  const ids = raw.split('|').map((part) => part.trim()).filter(Boolean);
+  if (!ids.length) throw new Error('没有给歌单');
+  const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX), session);
+  if (!tracks.length) throw new Error('这些歌都拿不到');
+  return { title: `${tracks.length} 首歌`, playlistId: '', total: ids.length, tracks };
+};
+
+const AUDIO_MAX = 6_000_000;let audioCache: { key: string; at: number; audio: { dataUrl: string; mime: string; size: number } } = { key: '', at: 0, audio: { dataUrl: '', mime: '', size: 0 } };
 
 const audio = async (id: string, quality: string): Promise<{ dataUrl: string; mime: string; size: number }> => {
   const key = `${id}:${quality}`;
@@ -549,6 +632,28 @@ http
       search(q)
         .then((results) => answer(res, 200, { results }))
         .catch((error: Error) => answer(res, 200, { results: [], error: error.message }));
+      return;
+    }
+    if (url.pathname === '/playlist') {
+      const source = (url.searchParams.get('source') ?? '').trim();
+      if (!source) {
+        answer(res, 200, { error: '缺少歌单' });
+        return;
+      }
+      playlist(source)
+        .then((result) => answer(res, 200, result))
+        .catch((error: Error) => answer(res, 200, { error: error.message }));
+      return;
+    }
+    if (url.pathname === '/playlists') {
+      const session = readSession();
+      if (!session) {
+        answer(res, 200, { loggedIn: false, playlists: [] });
+        return;
+      }
+      playlists(session)
+        .then((rows) => answer(res, 200, { loggedIn: true, playlists: rows }))
+        .catch((error: Error) => answer(res, 200, { loggedIn: true, playlists: [], error: error.message }));
       return;
     }
     if (url.pathname === '/audio') {

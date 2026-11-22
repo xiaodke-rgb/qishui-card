@@ -26,6 +26,13 @@
           "entry": "blocks/login.html",
           "height": 300,
           "answers": true
+        },
+        {
+          "name": "QishuiPlaylist",
+          "description": "汽水歌单卡片，折叠时和单曲卡一样。source: @liked 取账号收藏，或 id1|id2 指定曲目",
+          "args": ["source"],
+          "entry": "blocks/playlist.html",
+          "height": 96
         }
       ]
     }
