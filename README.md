@@ -35,7 +35,7 @@ bun install
 [安装汽水音乐卡片](openchamber://extensions/install?path=/绝对路径/qishui-card)
 ```
 
-安装时会请求 `service` 权限（本地服务进程），必须允许才能搜歌和取音频。
+安装时会请求两项权限：`service`（本地服务进程，搜歌、取音频、扫码登录都靠它）和 `opencodePlugin`（把 `qishui_search` 工具装进 OpenCode，让模型自己搜歌排歌单）。两项都点允许：缺 `service` 播不了，缺 `opencodePlugin` 就只能人工查 id。
 
 ## 用法
 
@@ -50,6 +50,8 @@ card = QishuiCard("晴天 周杰伦")
 
 `QishuiCard(query)` 只有一个参数：搜索词，歌名带上歌手更准。
 
+装了 `opencodePlugin` 后模型自己就有 `qishui_search` 工具：它能搜到真实曲目 id，再用 `QishuiPlaylist("id1|id2|id3")` 拼成可直接播放的歌单，不用人工查 id。
+
 ## 它是怎么工作的
 
 三个部分：
@@ -61,6 +63,7 @@ card = QishuiCard("晴天 周杰伦")
 | `blocks/login.*` | 登录区块：二维码、状态行、重新生成 |
 | `service/main.*` | 本地服务：搜索、歌单、取封面、下载音频、解密、扫码登录 |
 | `service/decrypt.*` | 解密器：剥掉 CENC 加密容器，输出干净的可播 MP4 |
+| `plugin/index.*` | OpenCode 插件：注册 `qishui_search` 工具，只打搜索接口，不依赖服务 |
 
 细节：
 
@@ -83,6 +86,7 @@ bunx openchamber-guest-bundle blocks/playlist.ts blocks/playlist.js
 bunx openchamber-guest-bundle blocks/login.ts blocks/login.js
 bunx openchamber-guest-bundle panel/main.ts panel/main.js
 bunx openchamber-guest-bundle --node service/main.ts service/main.js
+bunx openchamber-guest-bundle --node plugin/index.ts plugin/index.js
 bunx openchamber-guest-check
 ```
 
