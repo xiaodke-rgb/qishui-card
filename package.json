@@ -11,6 +11,7 @@
     "icon": "music-2",
     "contributes": {
       "service": { "entry": "service/main.js", "runtime": "host", "permissions": { "exec": [] } },
+      "opencodePlugin": "plugin",
       "blocks": [
         {
           "name": "QishuiCard",
