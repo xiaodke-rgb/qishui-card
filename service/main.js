@@ -484,7 +484,7 @@ var csrOf = (privateKey, publicKey) => {
   const subject = der(48, ...[[3, "bd-ticket-guard"], [11, ""], [10, ""]].map(([id, value]) => der(49, der(48, der(6, Buffer.from([85, 4, Number(id)])), der(12, Buffer.from(String(value)))))));
   const info = der(48, der(2, Buffer.from([0])), subject, publicKey.export({ type: "spki", format: "der" }), der(160));
   const algorithm = der(48, der(6, Buffer.from("2a8648ce3d040302", "hex")));
-  const request = der(48, info, algorithm, der(3, Buffer.from([0])), sign("sha256", info, privateKey));
+  const request = der(48, info, algorithm, der(3, Buffer.concat([Buffer.from([0]), sign("sha256", info, privateKey)])));
   const pem = `-----BEGIN CERTIFICATE REQUEST-----
 ${request.toString("base64").match(/.{1,64}/g).join(`
 `)}
@@ -537,26 +537,42 @@ var readJson = async (res) => {
     return null;
   }
 };
+var pick = (body, key) => {
+  if (!body || typeof body !== "object")
+    return;
+  if (body[key] != null)
+    return body[key];
+  const data = body.data;
+  if (data && typeof data === "object") {
+    if (data[key] != null)
+      return data[key];
+    const inner = data.data;
+    if (inner && typeof inner === "object" && inner[key] != null)
+      return inner[key];
+  }
+  return;
+};
 var qrCreate = async () => {
   const res = await fetch(`https://open.douyin.com/oauth/get_qrcode/?${new URLSearchParams(QR_PARAMS)}`, { headers: { "user-agent": UA } });
   const body = await readJson(res);
-  const data = body?.data?.data ?? body?.data ?? {};
-  if (!data?.token || !data?.qrcode)
+  const qrToken = pick(body, "token");
+  const qrImage = pick(body, "qrcode");
+  if (!qrToken || !qrImage)
     throw new Error("出码失败");
   const key = randomBytes(16).toString("hex");
   const expiresAt = Date.now() + QR_TTL;
-  const indexUrl = String(data.qrcode_index_url ?? "");
-  pending = { key, token: String(data.token), expiresAt, indexUrl };
-  return { key, qr: `data:image/png;base64,${data.qrcode}`, expiresAt, indexUrl };
+  const indexUrl = String(pick(body, "qrcode_index_url") ?? "");
+  pending = { key, token: String(qrToken), expiresAt, indexUrl };
+  return { key, qr: `data:image/png;base64,${qrImage}`, expiresAt, indexUrl };
 };
 var exchangeAccessCode = async (code, deviceId) => {
   const res = await fetch(`https://open.qishui.com${PREFIX}/access/code/get/?${params(deviceId)}&auth_code=${encodeURIComponent(code)}`, { headers: { "user-agent": UA } });
   const body = await readJson(res);
-  const data = body?.data?.data ?? body?.data ?? null;
-  if (!data?.access_code) {
+  const access_code = pick(body, "access_code");
+  if (!access_code) {
     throw new Error(`换 access_code 失败 ${body?.err_no ?? res.status}: ${body?.err_msg ?? ""}`);
   }
-  return data;
+  return { access_code: String(access_code), open_id: String(pick(body, "open_id") ?? ""), expires_time: pick(body, "expires_time") };
 };
 var exchangeTicket = async (access, guard, deviceId) => {
   const res = await fetch(`https://open-client.douyin.com/passport/open/get_access_ticket/?${new URLSearchParams({ aid: "1128", client_key: "aw4bbxfujo741d09", device_platform: "android" })}`, {
@@ -596,7 +612,7 @@ var fetchUser = async (session) => {
     body: JSON.stringify({ common_params: {} })
   });
   const body = await readJson(res);
-  const mine = body?.data?.my_info ?? null;
+  const mine = pick(body, "my_info") ?? null;
   if (!mine?.id)
     throw new Error(`读身份失败 ${body?.err_no ?? res.status}: ${body?.err_msg ?? ""}`);
   return { id: String(mine.id), nickname: String(mine.nickname ?? ""), isVip: mine.is_vip === true };
@@ -626,8 +642,7 @@ var qrCheck = async (key) => {
   }
   const res = await fetch(`https://open.douyin.com/oauth/check_qrcode/?${new URLSearchParams({ ...QR_PARAMS, token: current.token, timestamp: String(Date.now()) })}`, { headers: { "user-agent": UA } });
   const body = await readJson(res);
-  const data = body?.data?.data ?? body?.data ?? {};
-  const state = String(data.status ?? "");
+  const state = String(pick(body, "status") ?? "");
   if (state === "new" || state === "scanned")
     return { state };
   if (state === "expired" || state === "refused") {
@@ -637,7 +652,7 @@ var qrCheck = async (key) => {
   }
   if (state !== "confirmed")
     return { state: state || "unknown" };
-  const code = data.code ?? data.auth_code;
+  const code = pick(body, "code") ?? pick(body, "auth_code");
   if (!code)
     return { state: "error", stage: "qrcode", error: "没有拿到授权码" };
   if (pending?.key === key)
@@ -649,10 +664,10 @@ var renewSession = async (session) => {
     headers: { "user-agent": UA }
   });
   const body = await readJson(res);
-  const data = body?.data?.data ?? body?.data ?? null;
-  if (!data?.access_code)
+  const access_code = pick(body, "access_code");
+  if (!access_code)
     throw new Error(`续期失败 ${body?.err_no ?? res.status}: ${body?.err_msg ?? ""}`);
-  const renewed = await exchangeTicket({ access_code: data.access_code, open_id: data.open_id ?? session.openId, expires_time: data.expires_time }, { privateKeyPem: session.privateKeyPem, csr: session.client_csr }, session.deviceId);
+  const renewed = await exchangeTicket({ access_code: String(access_code), open_id: String(pick(body, "open_id") ?? session.openId), expires_time: pick(body, "expires_time") }, { privateKeyPem: session.privateKeyPem, csr: session.client_csr }, session.deviceId);
   renewed.user = await fetchUser(renewed);
   saveSession(renewed);
   return renewed;

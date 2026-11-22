@@ -154,7 +154,8 @@ const csrOf = (privateKey: any, publicKey: any): string => {
   );
   const info = der(0x30, der(2, Buffer.from([0])), subject, publicKey.export({ type: 'spki', format: 'der' }), der(0xa0));
   const algorithm = der(0x30, der(6, Buffer.from('2a8648ce3d040302', 'hex')));
-  const request = der(0x30, info, algorithm, der(3, Buffer.from([0])), sign('sha256', info, privateKey));
+  // BIT STRING 里必须是「0 未用位数 + 签名」，签名漏在外面会让服务端判 10001。
+  const request = der(0x30, info, algorithm, der(3, Buffer.concat([Buffer.from([0]), sign('sha256', info, privateKey)])));
   const pem = `-----BEGIN CERTIFICATE REQUEST-----\n${request.toString('base64').match(/.{1,64}/g)!.join('\n')}\n-----END CERTIFICATE REQUEST-----\n`;
   return Buffer.from(pem).toString('base64');
 };
@@ -215,17 +216,31 @@ const readJson = async (res: Response): Promise<any> => {
   }
 };
 
+/** 平台接口的包裹层数不统一：有的字段直接放顶层，有的在 data / data.data。 */
+const pick = (body: any, key: string): any => {
+  if (!body || typeof body !== 'object') return undefined;
+  if (body[key] != null) return body[key];
+  const data = body.data;
+  if (data && typeof data === 'object') {
+    if (data[key] != null) return data[key];
+    const inner = data.data;
+    if (inner && typeof inner === 'object' && inner[key] != null) return inner[key];
+  }
+  return undefined;
+};
+
 const qrCreate = async (): Promise<{ key: string; qr: string; expiresAt: number; indexUrl: string }> => {
   const res = await fetch(`https://open.douyin.com/oauth/get_qrcode/?${new URLSearchParams(QR_PARAMS)}`, { headers: { 'user-agent': UA } });
   const body = await readJson(res);
-  const data = body?.data?.data ?? body?.data ?? {};
-  if (!data?.token || !data?.qrcode) throw new Error('出码失败');
+  const qrToken = pick(body, 'token');
+  const qrImage = pick(body, 'qrcode');
+  if (!qrToken || !qrImage) throw new Error('出码失败');
   const key = randomBytes(16).toString('hex');
   const expiresAt = Date.now() + QR_TTL;
   // indexUrl 只是给用户复制到手机浏览器的纯文本，页面不给它做 href。
-  const indexUrl = String(data.qrcode_index_url ?? '');
-  pending = { key, token: String(data.token), expiresAt, indexUrl };
-  return { key, qr: `data:image/png;base64,${data.qrcode}`, expiresAt, indexUrl };
+  const indexUrl = String(pick(body, 'qrcode_index_url') ?? '');
+  pending = { key, token: String(qrToken), expiresAt, indexUrl };
+  return { key, qr: `data:image/png;base64,${qrImage}`, expiresAt, indexUrl };
 };
 
 /** 用授权码换 access_code。必须走 open.qishui.com，且带全套车机公共参数。 */
@@ -235,11 +250,11 @@ const exchangeAccessCode = async (code: string, deviceId: string): Promise<{ acc
     { headers: { 'user-agent': UA } },
   );
   const body = await readJson(res);
-  const data = body?.data?.data ?? body?.data ?? null;
-  if (!data?.access_code) {
+  const access_code = pick(body, 'access_code');
+  if (!access_code) {
     throw new Error(`换 access_code 失败 ${body?.err_no ?? res.status}: ${body?.err_msg ?? ''}`);
   }
-  return data;
+  return { access_code: String(access_code), open_id: String(pick(body, 'open_id') ?? ''), expires_time: pick(body, 'expires_time') };
 };
 
 /** 用 access_code 换 ticket。CSR 用 -client-cert 会 10003 且消耗 code，必须 -client-csr。 */
@@ -289,7 +304,7 @@ const fetchUser = async (session: Session): Promise<User> => {
     body: JSON.stringify({ common_params: {} }),
   });
   const body = await readJson(res);
-  const mine = body?.data?.my_info ?? null;
+  const mine = pick(body, 'my_info') ?? null;
   if (!mine?.id) throw new Error(`读身份失败 ${body?.err_no ?? res.status}: ${body?.err_msg ?? ''}`);
   return { id: String(mine.id), nickname: String(mine.nickname ?? ''), isVip: mine.is_vip === true };
 };
@@ -323,8 +338,7 @@ const qrCheck = async (key: string): Promise<Record<string, unknown>> => {
     { headers: { 'user-agent': UA } },
   );
   const body = await readJson(res);
-  const data = body?.data?.data ?? body?.data ?? {};
-  const state = String(data.status ?? '');
+  const state = String(pick(body, 'status') ?? '');
   if (state === 'new' || state === 'scanned') return { state };
   if (state === 'expired' || state === 'refused') {
     if (pending?.key === key) pending = null;
@@ -332,7 +346,7 @@ const qrCheck = async (key: string): Promise<Record<string, unknown>> => {
   }
   if (state !== 'confirmed') return { state: state || 'unknown' };
 
-  const code = data.code ?? data.auth_code;
+  const code = pick(body, 'code') ?? pick(body, 'auth_code');
   if (!code) return { state: 'error', stage: 'qrcode', error: '没有拿到授权码' };
   // 先占位消费掉，杜绝同一码被确认两次。
   if (pending?.key === key) pending = null;
@@ -345,10 +359,10 @@ const renewSession = async (session: Session): Promise<Session> => {
     headers: { 'user-agent': UA },
   });
   const body = await readJson(res);
-  const data = body?.data?.data ?? body?.data ?? null;
-  if (!data?.access_code) throw new Error(`续期失败 ${body?.err_no ?? res.status}: ${body?.err_msg ?? ''}`);
+  const access_code = pick(body, 'access_code');
+  if (!access_code) throw new Error(`续期失败 ${body?.err_no ?? res.status}: ${body?.err_msg ?? ''}`);
   const renewed = await exchangeTicket(
-    { access_code: data.access_code, open_id: data.open_id ?? session.openId, expires_time: data.expires_time },
+    { access_code: String(access_code), open_id: String(pick(body, 'open_id') ?? session.openId), expires_time: pick(body, 'expires_time') },
     { privateKeyPem: session.privateKeyPem, csr: session.client_csr },
     session.deviceId,
   );
