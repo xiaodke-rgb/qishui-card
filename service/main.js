@@ -785,21 +785,21 @@ var playlistDetail = async (id, session) => {
   const body = await platformPost("/playlist/detail/", { playlist_id: id, owner_id: session.user.id, count: 100, cursor: "", type: 1 }, session);
   return (body?.data?.media_entities ?? []).map((entity) => String(entity?.media_id ?? entity?.track_entity?.base_info?.id ?? "")).filter(Boolean);
 };
-var tracksByIds = async (ids, session) => {
+var tracksByIds = async (ids, session, max = 8) => {
   const wanted = [];
   for (const id of ids)
     if (id && !wanted.includes(id))
       wanted.push(id);
   const hits = [];
-  for (let index = 0;index < wanted.length && hits.length < 8; index += 8) {
+  for (let index = 0;index < wanted.length && hits.length < max; index += 8) {
     const batch = wanted.slice(index, index + 8);
     const body = await platformPost("/media/mget/", { media_list: batch.map((id) => ({ id, type: "track" })) }, session);
     const entities = body?.data?.media_list ?? [];
-    hits.push(...await hitsOf(entities, session?.user.isVip === true, 8 - hits.length));
+    hits.push(...await hitsOf(entities, session?.user.isVip === true, max - hits.length));
   }
   return hits;
 };
-var PLAYLIST_MAX = 8;
+var PLAYLIST_MAX = 30;
 var playlist = async (source) => {
   const session = readSession();
   const raw = source.trim();
@@ -810,13 +810,14 @@ var playlist = async (source) => {
       throw new Error("歌单需要先扫码登录");
     const liked = await likedPlaylist(session);
     const ids = await playlistDetail(liked.id, session);
-    const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX + 8), session);
+    const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX + 8), session, PLAYLIST_MAX);
     return { title: liked.title, playlistId: liked.id, total: ids.length, tracks };
   }
   const ids = raw.split("|").map((part) => part.trim()).filter(Boolean);
   if (!ids.length)
     throw new Error("没有给歌单");
-  const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX), session);
+  const wanted = ids.slice(0, PLAYLIST_MAX);
+  const tracks = await tracksByIds(wanted, session, wanted.length);
   if (!tracks.length)
     throw new Error("这些歌都拿不到");
   return { title: `${tracks.length} 首歌`, playlistId: "", total: ids.length, tracks };

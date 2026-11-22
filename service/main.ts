@@ -506,21 +506,21 @@ const playlistDetail = async (id: string, session: Session): Promise<any[]> => {
   return (body?.data?.media_entities ?? []).map((entity: any) => String(entity?.media_id ?? entity?.track_entity?.base_info?.id ?? '')).filter(Boolean);
 };
 
-/** 批量取详情（一次 mget 最多 8 首，返回里可能少个别失效曲）。 */
-const tracksByIds = async (ids: string[], session: Session | null): Promise<Hit[]> => {
+/** 批量取详情（一次 mget 最多 8 首，返回里可能少个别失效曲），按上限尽量补满。 */
+const tracksByIds = async (ids: string[], session: Session | null, max = 8): Promise<Hit[]> => {
   const wanted: string[] = [];
   for (const id of ids) if (id && !wanted.includes(id)) wanted.push(id);
   const hits: Hit[] = [];
-  for (let index = 0; index < wanted.length && hits.length < 8; index += 8) {
+  for (let index = 0; index < wanted.length && hits.length < max; index += 8) {
     const batch = wanted.slice(index, index + 8);
     const body = await platformPost('/media/mget/', { media_list: batch.map((id) => ({ id, type: 'track' })) }, session);
     const entities = body?.data?.media_list ?? [];
-    hits.push(...(await hitsOf(entities, session?.user.isVip === true, 8 - hits.length)));
+    hits.push(...(await hitsOf(entities, session?.user.isVip === true, max - hits.length)));
   }
   return hits;
 };
 
-const PLAYLIST_MAX = 8;
+const PLAYLIST_MAX = 30;
 
 /** source: "@liked" / "@me" 取账号收藏，否则按 id1|id2|... 取指定曲目。 */
 const playlist = async (source: string): Promise<{ title: string; playlistId: string; total: number; tracks: Hit[]; error?: string }> => {
@@ -532,12 +532,14 @@ const playlist = async (source: string): Promise<{ title: string; playlistId: st
     const liked = await likedPlaylist(session);
     const ids = await playlistDetail(liked.id, session);
     // mget 偶尔少返回失效曲，多取一截补满。
-    const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX + 8), session);
+    const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX + 8), session, PLAYLIST_MAX);
     return { title: liked.title, playlistId: liked.id, total: ids.length, tracks };
   }
   const ids = raw.split('|').map((part) => part.trim()).filter(Boolean);
   if (!ids.length) throw new Error('没有给歌单');
-  const tracks = await tracksByIds(ids.slice(0, PLAYLIST_MAX), session);
+  const wanted = ids.slice(0, PLAYLIST_MAX);
+  // 指定 id 时给多少放多少（失效曲会被跳过），不再截半截。
+  const tracks = await tracksByIds(wanted, session, wanted.length);
   if (!tracks.length) throw new Error('这些歌都拿不到');
   return { title: `${tracks.length} 首歌`, playlistId: '', total: ids.length, tracks };
 };
