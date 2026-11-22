@@ -100,11 +100,22 @@
         text-overflow: ellipsis;
       }
       .bar {
+        position: relative;
         margin-top: 8px;
         height: 3px;
         border-radius: 3px;
         background: rgba(255, 255, 255, 0.26);
-        overflow: hidden;
+        cursor: pointer;
+        touch-action: none;
+      }
+      /* 条形只有 3px，上下各扩 9px 做手指命中区。 */
+      .bar::before {
+        content: '';
+        position: absolute;
+        left: -2px;
+        right: -2px;
+        top: -9px;
+        bottom: -9px;
       }
       .bar > i {
         display: block;

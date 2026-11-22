@@ -541,7 +541,8 @@ const playlist = async (source: string): Promise<{ title: string; playlistId: st
   // 指定 id 时给多少放多少（失效曲会被跳过），不再截半截。
   const tracks = await tracksByIds(wanted, session, wanted.length);
   if (!tracks.length) throw new Error('这些歌都拿不到');
-  return { title: `${tracks.length} 首歌`, playlistId: '', total: ids.length, tracks };
+  // 空标题：卡片顶部回落到当前曲名，和单曲卡一致。
+  return { title: '', playlistId: '', total: ids.length, tracks };
 };
 
 const AUDIO_MAX = 6_000_000;let audioCache: { key: string; at: number; audio: { dataUrl: string; mime: string; size: number } } = { key: '', at: 0, audio: { dataUrl: '', mime: '', size: 0 } };

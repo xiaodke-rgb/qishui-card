@@ -820,7 +820,7 @@ var playlist = async (source) => {
   const tracks = await tracksByIds(wanted, session, wanted.length);
   if (!tracks.length)
     throw new Error("这些歌都拿不到");
-  return { title: `${tracks.length} 首歌`, playlistId: "", total: ids.length, tracks };
+  return { title: "", playlistId: "", total: ids.length, tracks };
 };
 var AUDIO_MAX = 6000000;
 var audioCache = { key: "", at: 0, audio: { dataUrl: "", mime: "", size: 0 } };

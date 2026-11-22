@@ -244,6 +244,43 @@ const render = async (query: string): Promise<void> => {
 
   button.addEventListener('click', () => void toggle());
 
+  // 进度条可拖：按下即定位，拖动时实时跟手，松开继续播原来的播放状态。
+  const seek = (fraction: number): void => {
+    const total = (buffer?.duration ?? 0) || current.duration / 1000;
+    if (!total) return;
+    offset = Math.min(Math.max(fraction, 0), 1) * total;
+    if (playing) {
+      release();
+      resume();
+    } else {
+      progress.style.width = `${(offset / total) * 100}%`;
+    }
+  };
+
+  const fractionAt = (event: PointerEvent): number => {
+    const box = bar.getBoundingClientRect();
+    return box.width > 0 ? (event.clientX - box.left) / box.width : 0;
+  };
+
+  bar.addEventListener('pointerdown', (event: PointerEvent) => {
+    if (event.button !== 0 && event.pointerType === 'mouse') return;
+    event.preventDefault();
+    bar.setPointerCapture(event.pointerId);
+    // 拖动时不要 0.2s 缓动，否则手感粘。
+    progress.style.transition = 'none';
+    seek(fractionAt(event));
+    const move = (moveEvent: PointerEvent): void => seek(fractionAt(moveEvent));
+    const up = (): void => {
+      progress.style.transition = '';
+      bar.removeEventListener('pointermove', move);
+      bar.removeEventListener('pointerup', up);
+      bar.removeEventListener('pointercancel', up);
+    };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up);
+    bar.addEventListener('pointercancel', up);
+  });
+
   const paint = (): void => {
     title.textContent = current.title;
     artist.textContent = [current.artist, clock(current.duration)].filter(Boolean).join(' · ');

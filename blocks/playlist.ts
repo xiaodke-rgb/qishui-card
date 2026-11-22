@@ -380,6 +380,43 @@ const render = async (source: string): Promise<void> => {
 
   button.addEventListener('click', () => void toggle());
 
+  // 进度条可拖：按下即定位，拖动时跟手，松开后按原播放状态继续。
+  const seek = (fraction: number): void => {
+    const total = buffers.get(current().id)?.duration ?? 0;
+    if (!total) return;
+    offset = Math.min(Math.max(fraction, 0), 1) * total;
+    if (playing) {
+      release();
+      resume();
+    } else {
+      progress.style.width = `${(offset / total) * 100}%`;
+    }
+  };
+
+  const fractionAt = (event: PointerEvent): number => {
+    const box = bar.getBoundingClientRect();
+    return box.width > 0 ? (event.clientX - box.left) / box.width : 0;
+  };
+
+  bar.addEventListener('pointerdown', (event: PointerEvent) => {
+    if (event.button !== 0 && event.pointerType === 'mouse') return;
+    event.preventDefault();
+    bar.setPointerCapture(event.pointerId);
+    // 拖动时不要 0.2s 缓动，否则手感粘。
+    progress.style.transition = 'none';
+    seek(fractionAt(event));
+    const move = (moveEvent: PointerEvent): void => seek(fractionAt(moveEvent));
+    const up = (): void => {
+      progress.style.transition = '';
+      bar.removeEventListener('pointermove', move);
+      bar.removeEventListener('pointerup', up);
+      bar.removeEventListener('pointercancel', up);
+    };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up);
+    bar.addEventListener('pointercancel', up);
+  });
+
   allrow.addEventListener('click', () => {
     const open = card.classList.toggle('open');
     allLabel.textContent = open ? `收起列表 · 共 ${tracks.length} 首` : `播放全部 · 共 ${tracks.length} 首`;
